@@ -35,7 +35,7 @@ struct Protein {
 	std::string 	sequence;
 };
 
-// class for BLOSUM penalties.. acts as a matrix holding penalties based 
+// class for BLOSUM penalties.. acts as a matrix holding penalties based
 //     on transitions for one amino acid to another
 class BlosumPenaltyArray {
 public:
@@ -88,7 +88,7 @@ typedef std::vector<std::shared_ptr<Protein>> ProteinVector;
 // per sequence (multi-line sequences are not allowed).
 // Returns false on I/O error.
 // -------------------------------------------------------------------------
-bool load_proteins(ProteinVector & proteins, const std::string& path) 
+bool load_proteins(ProteinVector & proteins, const std::string& path)
 {
   //std::cout << "Loading proteins from [" << path << "]" << std::endl;
   proteins.clear();
@@ -131,7 +131,7 @@ bool load_proteins(ProteinVector & proteins, const std::string& path)
 // per sequence (multi-line sequences are not allowed).
 // Returns false on I/O error.
 // -------------------------------------------------------------------------
-bool save_proteins(ProteinVector & proteins, const std::string& path) 
+bool save_proteins(ProteinVector & proteins, const std::string& path)
 {
 	std::cout << "Saving proteins from [" << path << "]" << std::endl;
 	std::ofstream ofs(path.c_str());
@@ -154,7 +154,7 @@ bool save_proteins(ProteinVector & proteins, const std::string& path)
 // Load the BLOSUM penalties from a standard BLOSUM file (matrix format)
 // Returns false on I/O error.
 // -------------------------------------------------------------------------
-bool load_blosum_file(BlosumPenaltyArray & bpa, const std::string& path) 
+bool load_blosum_file(BlosumPenaltyArray & bpa, const std::string& path)
 {
   std::ifstream ifs(path.c_str());
   if (!ifs.is_open() || !ifs.good()) {
@@ -197,31 +197,162 @@ bool load_blosum_file(BlosumPenaltyArray & bpa, const std::string& path)
 }
 
 // -------------------------------------------------------------------------
-int local_alignment(const std::string & string1, 
-					const std::string & string2, 
+int local_alignment(const std::string & string1,
+					const std::string & string2,
 					BlosumPenaltyArray & bpa,
-					std::string & matchString1, 
+					std::string & matchString1,
 					std::string & matchString2)
 {
-	int best_score = 0;
+  int best_score = 0, best_i = 0, up = 0, left = 0, diag = 0, max = 0;
+  bool done = false;
 	matchString1 = "";
 	matchString2 = "";
-	return best_score;
+  int len_str1 = string1.length();
+  int len_str2 = string2.length();
+
+  int dp[len_str1 + 1][len_str2 + 1]; // Dynamic programming array
+  char bp[len_str1 + 1][len_str2 + 1]; // Back pointers array
+
+  // Initialize 2-D arrays
+  for(int i = 0; i < len_str1 + 1; i++)
+  {
+    for(int j = 0; j < len_str2 + 1; j++)
+    {
+      dp[i][j] = 0;
+      bp[i][j] = '?';
+    }
+  }
+
+  // Set dynamic programming array values including penalties
+  for(int i = 1; i < len_str1 + 1; i++)
+  {
+    for(int j = 1; j < len_str2 + 1; j++)
+    {
+      up = dp[i - 1][j] + bpa.get_penalty(string1[i - 1], '*');
+      left = dp[i][j - 1] + bpa.get_penalty('*', string2[j - 1]);
+      diag = dp[i - 1][j - 1] + bpa.get_penalty(string1[i - 1], string2[j - 1]);
+
+      // Set back pointers array values accordingly
+      if(left > up)
+      {
+        if(left > diag)
+        {
+          bp[i][j] = 'l';
+        }
+        else
+        {
+          bp[i][j] = 'd';
+        }
+      }
+      else
+      {
+        if(up > diag)
+        {
+          bp[i][j] = 'u';
+        }
+        else
+        {
+          bp[i][j] = 'd';
+        }
+      }
+
+      // Find the largest value and set dynamic array, if none, use zero.
+      max = 0;
+      if(up > max)
+      {
+        max = up;
+      }
+      if(left > max)
+      {
+        max = left;
+      }
+      if(diag > max)
+      {
+        max = diag;
+      }
+      dp[i][j] = max;
+    }
+  }
+
+  // Locate best score from bottom row
+  best_i = len_str1;
+  int best_j = 0;
+  for(int j = 1; j < len_str2 + 1; j++)
+  {
+    if(dp[best_i][j] > best_score)
+    {
+      best_score = dp[best_i][j];
+      best_j = j;
+    }
+  }
+
+  // Follow back pointers to get alignment
+  int i = best_i;
+  int j = best_j;
+
+  while(!done)
+  {
+    if(bp[i][j] == 'u')
+    {
+      matchString1 += string1[i - 1];
+      matchString2 += '*';
+      i--;
+    }
+    else if(bp[i][j] == 'l')
+    {
+      matchString1 += '*';
+      matchString2 += string2[j - 1];
+      j--;
+    }
+    else if(bp[i][j] == 'd')
+    {
+      matchString1 += string1[i - 1];
+      matchString2 += string2[j - 1];
+      i--;
+      j--;
+    }
+    else if(bp[i][j] == '?')
+    {
+      done = true;
+    }
+  }
+
+  // Return matches in appropriate order
+  reverse(matchString1.begin(), matchString1.end());
+  reverse(matchString2.begin(), matchString2.end());
+  return best_score;
 }
 
 // -------------------------------------------------------------------------
 std::shared_ptr<Protein> local_alignment_best_match(
-					ProteinVector & proteins, 
+					ProteinVector & proteins,
 					const std::string & string1,
 					BlosumPenaltyArray & bpa,
-					std::string & matchString1, 
+					std::string & matchString1,
 					std::string & matchString2)
 {
-	std::shared_ptr<Protein> best_protein = nullptr;
-	matchString1 = "";
-	matchString2 = "";
+  std::shared_ptr<Protein> best_protein = nullptr;
+  int best_score = 0, score = 0, best_i = 0;
+  matchString1 = "";
+  matchString2 = "";
+  std::string runningBest1 = "";
+  std::string runningBest2 = "";
 
-	return best_protein;
+  // Traverse proteins vector to locate best match
+  for(int i = 0; i < proteins.size(); i++)
+  {
+    score = local_alignment(proteins[i]->sequence, string1, bpa, matchString1, matchString2);
+    if(score > best_score)
+    {
+      // Store best's details
+      best_score = score;
+      best_i = i;
+      runningBest1 = matchString1;
+      runningBest2 = matchString2;
+    }
+  }
+  matchString1 = runningBest1;
+  matchString2 = runningBest2;
+  std::cout << string1 << ": best score - " << best_score << std::endl;
+	return best_protein = proteins[best_i];
 }
-
-
